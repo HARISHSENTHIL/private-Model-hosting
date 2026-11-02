@@ -14,7 +14,10 @@ ARG COMFYUI_GIT_REF=REPLACE_WITH_VERIFIED_COMMIT_SHA
 
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# This host's network allows outbound HTTPS but blocks plain HTTP (port 80) —
+# Ubuntu's default mirrors are http://, so switch to https:// before updating.
+RUN sed -i 's|http://archive.ubuntu.com|https://archive.ubuntu.com|g; s|http://security.ubuntu.com|https://security.ubuntu.com|g' /etc/apt/sources.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
         git python3 python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
