@@ -1,0 +1,58 @@
+services:
+  llm-huihui-qwen:
+    build: ./services/llm-huihui-qwen
+    env_file: .env
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+    ports:
+      - "8001:8000"
+    volumes:
+      - ${MODEL_CACHE_DIR}/huihui-qwen:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    shm_size: "16gb"
+    restart: unless-stopped
+
+  image-qwen:
+    build: ./services/image-qwen
+    env_file: .env
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+    ports:
+      - "8002:8000"
+    volumes:
+      - ${MODEL_CACHE_DIR}/qwen-image:/root/.cache/huggingface
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["3"]
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  image-lustify:
+    build: ./services/image-lustify
+    env_file: .env
+    environment:
+      - CIVITAI_API_TOKEN=${CIVITAI_API_TOKEN}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+    ports:
+      - "8003:8000"
+    volumes:
+      - ${MODEL_CACHE_DIR}/lustify:/root/comfyui/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["2"]
+              capabilities: [gpu]
+    restart: unless-stopped
