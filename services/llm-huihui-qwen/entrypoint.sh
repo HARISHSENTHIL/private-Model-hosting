@@ -11,11 +11,13 @@ exec sglang serve \
     --dtype bfloat16 \
     --tensor-parallel-size 1 \
     --context-length 32768 \
-    --mem-fraction-static 0.85 \
+    --mem-fraction-static 0.80 \
     --attention-backend flashinfer \
-    --chunked-prefill-size 32768 \
-    --max-prefill-tokens 32768 \
-    --max-running-requests "${LLM_MAX_RUNNING_REQUESTS:-32}" \
+    --chunked-prefill-size 2048 \
+    --max-prefill-tokens 4096 \
+    --disable-prefill-cuda-graph \
+    --cuda-graph-max-bs-decode 8 \
+    --max-running-requests "${LLM_MAX_RUNNING_REQUESTS:-8}" \
     --max-queued-requests "${LLM_MAX_QUEUED_REQUESTS:-128}" \
     --schedule-policy fcfs \
     --reasoning-parser qwen3 \

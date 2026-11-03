@@ -19,8 +19,9 @@ services:
     environment:
       HF_TOKEN: ${HF_TOKEN:?HF_TOKEN must be set}
       INTERNAL_API_KEY: ${INTERNAL_API_KEY:?INTERNAL_API_KEY must be set}
-      LLM_MAX_RUNNING_REQUESTS: ${LLM_MAX_RUNNING_REQUESTS:-32}
+      LLM_MAX_RUNNING_REQUESTS: ${LLM_MAX_RUNNING_REQUESTS:-8}
       LLM_MAX_QUEUED_REQUESTS: ${LLM_MAX_QUEUED_REQUESTS:-128}
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
     ports:
       - "${PRIVATE_BIND_ADDRESS:-127.0.0.1}:8001:8000"
     volumes:
