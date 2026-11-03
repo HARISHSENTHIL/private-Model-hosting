@@ -55,6 +55,7 @@ class Artifact:
     url: str
     relative_path: str
     sha256: str
+    size_bytes: int
     token_env: str
 
 
@@ -64,6 +65,7 @@ ARTIFACTS = (
         url="https://civitai.com/api/download/models/3112728?fileId=3015314",
         relative_path="diffusion_models/lustify-v10-krea-raw-bf16.safetensors",
         sha256="04571b6cf9b9c8a3868ed3695c94de48d8206a37670ea36c6a043e86dda327d3",
+        size_bytes=26_283_344_816,
         token_env="CIVITAI_API_TOKEN",
     ),
     Artifact(
@@ -75,6 +77,7 @@ ARTIFACTS = (
         ),
         relative_path="text_encoders/qwen3vl_4b_bf16.safetensors",
         sha256="36f3ff447ef59201722e8f9ce6020c9819fdcfba6aa2608c4e09b1c0ce114e34",
+        size_bytes=8_875_719_384,
         token_env="HF_TOKEN",
     ),
     Artifact(
@@ -86,6 +89,7 @@ ARTIFACTS = (
         ),
         relative_path="vae/wan_2.1_vae.safetensors",
         sha256="2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b",
+        size_bytes=253_815_318,
         token_env="HF_TOKEN",
     ),
 )
@@ -130,6 +134,24 @@ def download(artifact: Artifact) -> None:
 
     partial = destination.with_suffix(destination.suffix + ".part")
     resume_at = partial.stat().st_size if partial.exists() else 0
+    if resume_at > artifact.size_bytes:
+        partial.unlink()
+        raise RuntimeError(
+            f"partial file for {artifact.name} is larger than the pinned artifact; "
+            "removed it so the next attempt starts cleanly"
+        )
+    if resume_at == artifact.size_bytes:
+        print(f"verifying completed partial for {artifact.name}", flush=True)
+        actual = sha256_file(partial)
+        if actual == artifact.sha256:
+            os.replace(partial, destination)
+            print(f"verified {artifact.name}", flush=True)
+            return
+        partial.unlink()
+        raise RuntimeError(
+            f"completed partial for {artifact.name} failed checksum verification; "
+            "removed it so the next attempt starts cleanly"
+        )
     headers = {
         "Authorization": f"Bearer {token}",
         "User-Agent": "private-model-hosting/1.0",
@@ -169,6 +191,20 @@ def download(artifact: Artifact) -> None:
     except (OSError, urllib.error.URLError):
         print(f"download interrupted; partial file retained at {partial}", flush=True)
         raise
+
+    actual_size = partial.stat().st_size
+    if actual_size < artifact.size_bytes:
+        raise RuntimeError(
+            f"incomplete download for {artifact.name}: expected "
+            f"{artifact.size_bytes} bytes, received {actual_size}; "
+            f"partial file retained for resume"
+        )
+    if actual_size > artifact.size_bytes:
+        partial.unlink()
+        raise RuntimeError(
+            f"download for {artifact.name} exceeded the pinned size; "
+            "removed the invalid partial file"
+        )
 
     actual = sha256_file(partial)
     if actual != artifact.sha256:
