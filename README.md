@@ -1,67 +1,113 @@
-# private-model-hosting
+# Private model hosting
 
-Self-hosted inference stack for proxyllm's "Private" privacy tier — self-owned
-GPUs, zero-data-retention, no routing through third-party vendors.
+Production-oriented, OpenAI-compatible inference for a single 4× H100 80 GB
+node. The stack keeps prompts and outputs on infrastructure you control.
 
-Hardware target: a single node with 4x NVIDIA H100 80GB SXM (NVLink).
+| Service | Engine | GPUs | Endpoint |
+|---|---|---:|---|
+| Huihui Qwen3.8 27B | SGLang 0.5.19 | 0, TP=1 | `:8001/v1/chat/completions` |
+| Qwen Image 2.1 | vLLM-Omni 0.32 | 3 | `:8002/v1/images/*` |
+| LUSTIFY v10 Krea 2 RAW | ComfyUI 0.43 + bounded shim | 2 | `:8003/v1/images/generations` |
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design
-(GPU allocation, serving framework choice per model, capacity math) and
-[`docs/LICENSES.md`](docs/LICENSES.md) for what's cleared for commercial use
-vs. what's an accepted interim risk — **read that before enabling any model for
-paying users.**
+GPU 1 is intentionally unallocated and available for another model or a
+measured replica. The BF16 LLM fits on one 80 GB H100, but with substantially
+less cache and concurrency headroom than the former TP=2 layout.
 
-## Services
+The images, model revisions, and downloaded artifacts are immutable-version or
+SHA-256 pinned. APIs bind to loopback by default, receive only the secrets they
+need, expose health checks and metrics, and use bounded admission queues.
 
-| Service | GPU(s) | Model | Port |
-|---|---|---|---|
-| `llm-huihui-qwen` | 0, 1 (TP=2) | `huihui-ai/Huihui-Qwen3.8-27B-abliterated` via SGLang | 8001 |
-| `image-qwen` | 3 | `Qwen/Qwen-Image-2.1` via Diffusers + FastAPI | 8002 |
-| `image-lustify` | 2 | LUSTIFY V10 "Krea 2" via ComfyUI + FastAPI shim | 8003 |
+## Production gates
 
-Every service exposes an OpenAI-compatible API on its port
-(`/v1/chat/completions` for the LLM, `/v1/images/generations` +
-`/v1/images/edits` for the image services) so proxyllm can route to it with a
-plain `openai/<name>` + `api_base` config entry — no custom litellm provider
-code needed. See `ARCHITECTURE.md` for why.
+Read [`docs/LICENSES.md`](docs/LICENSES.md) before starting either image model.
+As of 2026-11-03, Qwen Image 2.1 is non-commercial without a separate license,
+and LUSTIFY/Krea 2 is not cleared for a general paid API. LUSTIFY is therefore
+behind the explicit Compose profile `restricted`.
 
-## Running
+This repository supplies inference infrastructure. It does not by itself supply
+the age verification, consent/NCII controls, content moderation, abuse response,
+audit retention, or jurisdiction-specific compliance required for a public
+adult-image service.
+
+## Host prerequisites
+
+- Linux x86_64, Docker Engine with Compose v2, and NVIDIA Container Toolkit.
+- Four H100 80 GB GPUs visible to Docker as IDs `0,1,2,3`.
+- An NVIDIA driver compatible with CUDA 13 containers. The SGLang image itself
+  uses CUDA 12.9; vLLM-Omni 0.32 uses CUDA 13.0.
+- 500 GB or more of fast local NVMe storage.
+- Outbound HTTPS to Hugging Face, Civitai, Docker Hub, and GitHub while building
+  and downloading models.
+
+Run the preflight before the first build:
 
 ```bash
-cp .env.example .env   # fill in HF_TOKEN, CIVITAI_API_TOKEN, INTERNAL_API_KEY
+cp .env.example .env
+chmod 600 .env
+# Fill in the three secrets and set MODEL_CACHE_DIR.
+./scripts/preflight.sh
+```
+
+The Civitai token shown in earlier development context must be rotated before
+this stack is deployed.
+
+## Build and start
+
+The default Compose profile contains only the commercially cleared LLM. Build
+and start either restricted image service only after obtaining the required
+approvals described above.
+
+```bash
+docker compose build llm-huihui-qwen
 docker compose up -d llm-huihui-qwen
-docker compose up -d image-qwen
-docker compose up -d image-lustify
+
+# Research/internal evaluation only until Qwen commercial licensing clears:
+docker compose --profile research build image-qwen
+docker compose --profile research up -d image-qwen
+
+# Restricted/internal evaluation only until licensing and safety gates clear:
+docker compose --profile restricted build image-lustify
+docker compose --profile restricted up -d image-lustify
 ```
 
-Bring services up one at a time the first time — each one downloads tens of GB
-of weights on first start (see `docs/ARCHITECTURE.md` for exact sizes).
-
-## Benchmarking (required before any throughput promise)
-
-None of the latency/concurrency numbers in `docs/ARCHITECTURE.md` are measured
-yet — they're estimates from the model architectures and published research.
-Run these against the real hardware and update that doc:
+First startup downloads roughly 56 GB for the LLM, 33 GB for Qwen Image, and
+about 34 GB for LUSTIFY. Health-check start periods account for this, but actual
+download time depends on the host connection.
 
 ```bash
-python bench/bench_llm.py --url http://localhost:8001 --max-concurrency 200
-python bench/bench_image.py --url http://localhost:8002 --endpoint generations
-python bench/bench_image.py --url http://localhost:8003 --endpoint generations
+docker compose ps
+docker compose logs -f llm-huihui-qwen
 ```
 
-## Wiring into proxyllm
+## Admission control and concurrency
 
-Once a service is up and benchmarked, add it to proxyllm's config as a plain
-OpenAI-compatible entry (see `config/chat/primary.yaml` / `config/image/primary.yaml`
-in the proxyllm repo for the existing pattern used for Surplus and the
-self-hosted `flux-2-klein-4b` entry):
+- SGLang continuously batches LLM tokens. `LLM_MAX_RUNNING_REQUESTS` caps the
+  active batch and `LLM_MAX_QUEUED_REQUESTS` rejects overload instead of growing
+  memory without bound.
+- vLLM-Omni uses step-wise diffusion scheduling and prefix-KV reuse.
+  `QWEN_IMAGE_MAX_NUM_SEQS` controls active images and
+  `QWEN_IMAGE_MAX_QUEUED_REQUESTS` bounds total in-flight requests.
+- ComfyUI renders one LUSTIFY image at a time. The shim keeps a bounded FCFS
+  queue and returns HTTP 503 with `Retry-After` when full.
 
-```yaml
-- model_name: huihui-qwen-abliterated
-  litellm_params:
-    model: openai/huihui-qwen3-27b-abliterated
-    api_base: http://<host>:8001/v1
-    api_key: os.environ/PRIVATE_LLM_API_KEY
+The defaults are safe starting points, not throughput promises. Benchmark the
+actual node, then tune from observed p95 latency, GPU memory, and queue depth.
+
+## Verification
+
+```bash
+curl -fsS http://127.0.0.1:8001/health
+curl -fsS http://127.0.0.1:8002/health
+curl -fsS http://127.0.0.1:8003/health
+
+python bench/bench_llm.py \
+  --url http://127.0.0.1:8001 \
+  --api-key "$INTERNAL_API_KEY"
+
+python bench/bench_image.py \
+  --url http://127.0.0.1:8002 \
+  --api-key "$INTERNAL_API_KEY"
 ```
 
-That's a follow-up change in the proxyllm repo itself, not in this one.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the serving decisions,
+capacity controls, operations, and rollback guidance.

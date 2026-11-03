@@ -1,54 +1,60 @@
-# License tracking
+# License and launch gates
 
-Keep this file accurate as the source of truth for what's legally cleared to
-serve to paying customers vs. what's an accepted interim risk. Update it the
-moment any of these statuses change.
+Last checked: 2026-11-03. This is engineering tracking, not legal advice.
 
-## huihui-ai/Huihui-Qwen3.8-27B-abliterated
+## Huihui Qwen3.8 27B abliterated
 
-- **License**: Apache-2.0.
-- **Status**: cleared for commercial use. No restrictions found.
+- The model repository declares Apache-2.0.
+- Engineering status: permitted by the declared model license for commercial
+  serving, subject to product safety and applicable law.
+- Source: https://huggingface.co/huihui-ai/Huihui-Qwen3.8-27B-abliterated
 
-## Qwen/Qwen-Image-2.1
+## Qwen Image 2.1
 
-- **License**: Qwen Research License Agreement (`license: other`,
-  `license_name: qwen-research` on the HF model card).
-- **Key clauses** (from the repo's own `LICENSE` file):
-  - Section 1(i): "Non-Commercial" is defined as "for research or evaluation
-    purposes only."
-  - Section 2(a): rights are granted "FOR NON-COMMERCIAL PURPOSES ONLY."
-  - Section 2(b): "You shall not use the Materials for any commercial purpose
-    without obtaining a separate commercial license from us" — request one at
-    `model-business@notice.qwencloud.com`.
-  - Section 3 (Redistribution) is explicitly subject to Section 2 — bundling it
-    into a paid product doesn't override the non-commercial restriction.
-- **Status**: **ACCEPTED INTERIM RISK.** Decision made 2026-10-29/30: use it now
-  for the Private tier, revisit before this tier bills real customers. This is a
-  business/legal decision, not an engineering one — someone needs to actually
-  email Qwen about a commercial license before this goes fully live for paying
-  users.
-- **Note**: the newer `Qwen-Image-2.1-Turbo` checkpoint was considered first and
-  rejected for the same reason (same license, confirmed via its own LICENSE
-  file) — Qwen-Image-2.1 (non-Turbo) doesn't fix this, it carries the identical
-  restriction. The Apache-2.0-licensed alternative, if this risk becomes
-  unacceptable later, is the one-generation-earlier pair `Qwen/Qwen-Image-2512`
-  (T2I) + `Qwen/Qwen-Image-Edit-2511` (edit) — both confirmed Apache-2.0,
-  smaller quality/speed trade-off (no 2.1-era improvements), same family.
+- License: Qwen Research License, not Apache-2.0.
+- The license limits the granted rights to non-commercial research/evaluation
+  unless a separate commercial license is obtained from Qwen.
+- Status: **blocked for paid/commercial traffic**. Contact
+  `model-business@notice.qwencloud.com` and retain the signed approval before
+  enabling it in a paid privacy tier.
+- Sources:
+  - https://huggingface.co/Qwen/Qwen-Image-2.1
+  - https://github.com/QwenLM/Qwen-Image-2.1
 
-## LUSTIFY V10 "Krea 2" (civitai.com/models/573152)
+## LUSTIFY v10 / Krea 2
 
-- **Base model license (Krea 2)**: community license with a **$1,000,000
-  annual revenue cap** for free commercial use (per Krea's own enterprise
-  license page and third-party HF mirrors). Above that revenue threshold, or
-  for hosting an API endpoint to the Krea model, a paid enterprise license is
-  required from Krea.
-- **LUSTIFY V10's own version-specific license**: **OPEN — not yet confirmed.**
-  Civitai's WebFetch access returned HTTP 403 during research; civarchive's
-  mirror didn't show license/commercial-use terms for this specific version
-  either. The Civitai "License" tab (id 2875936, historically CreativeML
-  Open RAIL++-M with the uploader's own added use-restrictions) needs a manual,
-  logged-in check on `civitai.com/models/573152` before this model is enabled
-  for any paying user. **This is a hard gate, not a nice-to-have** — do this
-  before step 3 of `ARCHITECTURE.md`'s Verification section goes live.
-- **Status**: blocked on manual confirmation above. Treat as not cleared for
-  commercial use until that check is done and logged here.
+This checkpoint is a derivative of Krea 2 and has two independent gates.
+
+### Krea base license
+
+- Commercial use is allowed under the community license only while total
+  company-wide trailing-12-month revenue is below USD 1,000,000. At or above
+  that threshold an enterprise license is required.
+- Section 4.2 requires reasonable and appropriate content filters. The AUP
+  prohibits CSAM, NCII, rights violations, unlawful explicit content, removal
+  of safety measures, and other listed misuse.
+- Sources:
+  - https://www.krea.ai/krea-2-licensing
+  - https://www.krea.ai/krea-2-use-policy
+
+### LUSTIFY uploader permissions
+
+- Civitai API metadata for model `573152` currently reports commercial-use
+  flags `RentCivit` and `Image`, while derivatives and alternate licensing are
+  disabled. That does not clearly permit operating a general off-platform paid
+  inference API.
+- Status: **blocked for paid/public API traffic** until the checkpoint author
+  grants explicit written permission and counsel confirms both license layers.
+- The service remains in Compose's explicit `restricted` profile for internal
+  evaluation only.
+- Source: https://civitai.com/models/573152
+
+## Launch checklist
+
+- [ ] Signed Qwen Image commercial license retained.
+- [ ] Written LUSTIFY author permission for the intended API/business model.
+- [ ] Krea enterprise license if the revenue threshold applies.
+- [ ] Counsel confirms all checkpoint/base-model terms and jurisdictions.
+- [ ] Required attribution and notices shipped.
+- [ ] LUSTIFY safety controls, age assurance, consent/NCII response, abuse
+      reporting, and moderation have passed launch review.

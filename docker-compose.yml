@@ -1,14 +1,35 @@
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+  stop_grace_period: 2m
+
 services:
   llm-huihui-qwen:
-    build: ./services/llm-huihui-qwen
-    env_file: .env
+    <<: *service-defaults
+    platform: linux/amd64
+    build:
+      context: ./services/llm-huihui-qwen
     environment:
-      - HF_TOKEN=${HF_TOKEN}
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      HF_TOKEN: ${HF_TOKEN:?HF_TOKEN must be set}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?INTERNAL_API_KEY must be set}
+      LLM_MAX_RUNNING_REQUESTS: ${LLM_MAX_RUNNING_REQUESTS:-32}
+      LLM_MAX_QUEUED_REQUESTS: ${LLM_MAX_QUEUED_REQUESTS:-128}
     ports:
-      - "8001:8000"
+      - "${PRIVATE_BIND_ADDRESS:-127.0.0.1}:8001:8000"
     volumes:
-      - ${MODEL_CACHE_DIR}/huihui-qwen:/root/.cache/huggingface
+      - ${MODEL_CACHE_DIR:?MODEL_CACHE_DIR must be set}/huihui-qwen:/root/.cache/huggingface
+    ipc: host
+    shm_size: "32gb"
+    ulimits:
+      memlock: -1
+      stack: 67108864
     deploy:
       resources:
         reservations:
@@ -16,19 +37,33 @@ services:
             - driver: nvidia
               device_ids: ["0"]
               capabilities: [gpu]
-    shm_size: "16gb"
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20m
 
   image-qwen:
-    build: ./services/image-qwen
-    env_file: .env
+    <<: *service-defaults
+    platform: linux/amd64
+    profiles: ["research"]
+    build:
+      context: ./services/image-qwen
     environment:
-      - HF_TOKEN=${HF_TOKEN}
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      HF_TOKEN: ${HF_TOKEN:?HF_TOKEN must be set}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?INTERNAL_API_KEY must be set}
+      QWEN_IMAGE_MAX_NUM_SEQS: ${QWEN_IMAGE_MAX_NUM_SEQS:-4}
+      QWEN_IMAGE_MAX_QUEUED_REQUESTS: ${QWEN_IMAGE_MAX_QUEUED_REQUESTS:-36}
     ports:
-      - "8002:8000"
+      - "${PRIVATE_BIND_ADDRESS:-127.0.0.1}:8002:8000"
     volumes:
-      - ${MODEL_CACHE_DIR}/qwen-image:/root/.cache/huggingface
+      - ${MODEL_CACHE_DIR:?MODEL_CACHE_DIR must be set}/qwen-image:/root/.cache/huggingface
+    ipc: host
+    shm_size: "16gb"
+    ulimits:
+      memlock: -1
+      stack: 67108864
     deploy:
       resources:
         reservations:
@@ -36,18 +71,37 @@ services:
             - driver: nvidia
               device_ids: ["3"]
               capabilities: [gpu]
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20m
 
   image-lustify:
-    build: ./services/image-lustify
-    env_file: .env
+    <<: *service-defaults
+    platform: linux/amd64
+    profiles: ["restricted"]
+    build:
+      context: ./services/image-lustify
     environment:
-      - CIVITAI_API_TOKEN=${CIVITAI_API_TOKEN}
-      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      HF_TOKEN: ${HF_TOKEN:?HF_TOKEN must be set}
+      CIVITAI_API_TOKEN: ${CIVITAI_API_TOKEN:?CIVITAI_API_TOKEN must be set}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?INTERNAL_API_KEY must be set}
+      LUSTIFY_MAX_QUEUE_SIZE: ${LUSTIFY_MAX_QUEUE_SIZE:-32}
+      LUSTIFY_JOB_TIMEOUT_SECONDS: ${LUSTIFY_JOB_TIMEOUT_SECONDS:-900}
+      LUSTIFY_MAX_MEGAPIXELS: ${LUSTIFY_MAX_MEGAPIXELS:-4}
+      LUSTIFY_MAX_IMAGES_PER_REQUEST: ${LUSTIFY_MAX_IMAGES_PER_REQUEST:-4}
     ports:
-      - "8003:8000"
+      - "${PRIVATE_BIND_ADDRESS:-127.0.0.1}:8003:8000"
     volumes:
-      - ${MODEL_CACHE_DIR}/lustify:/root/comfyui/models
+      - ${MODEL_CACHE_DIR:?MODEL_CACHE_DIR must be set}/lustify:/root/comfyui/models
+    tmpfs:
+      - /root/comfyui/output:size=8g,mode=1770
+    shm_size: "16gb"
+    ulimits:
+      memlock: -1
+      stack: 67108864
     deploy:
       resources:
         reservations:
@@ -55,4 +109,9 @@ services:
             - driver: nvidia
               device_ids: ["2"]
               capabilities: [gpu]
-    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30m

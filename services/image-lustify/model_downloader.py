@@ -1,0 +1,155 @@
+"""Download and verify the immutable model artifacts required by LUSTIFY."""
+
+from __future__ import annotations
+
+import hashlib
+import os
+import shutil
+import sys
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+
+MODELS_ROOT = Path("/root/comfyui/models")
+CHUNK_SIZE = 16 * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class Artifact:
+    name: str
+    url: str
+    relative_path: str
+    sha256: str
+    token_env: str
+
+
+ARTIFACTS = (
+    Artifact(
+        name="LUSTIFY v10 Krea 2 RAW BF16",
+        url="https://civitai.com/api/download/models/3112728?fileId=3015314",
+        relative_path="diffusion_models/lustify-v10-krea-raw-bf16.safetensors",
+        sha256="04571b6cf9b9c8a3868ed3695c94de48d8206a37670ea36c6a043e86dda327d3",
+        token_env="CIVITAI_API_TOKEN",
+    ),
+    Artifact(
+        name="Qwen3-VL 4B BF16 Krea text encoder",
+        url=(
+            "https://huggingface.co/Comfy-Org/Krea-2/resolve/"
+            "588feaf955b08b9ac4723eeb751752ab045dba71/"
+            "text_encoders/qwen3vl_4b_bf16.safetensors"
+        ),
+        relative_path="text_encoders/qwen3vl_4b_bf16.safetensors",
+        sha256="36f3ff447ef59201722e8f9ce6020c9819fdcfba6aa2608c4e09b1c0ce114e34",
+        token_env="HF_TOKEN",
+    ),
+    Artifact(
+        name="Wan 2.1 VAE",
+        url=(
+            "https://huggingface.co/Comfy-Org/Wan-2.1/resolve/"
+            "123acf1cc74bccbb9bfff8ac1ee72edc08c2341d/"
+            "split_files/vae/wan_2.1_vae.safetensors"
+        ),
+        relative_path="vae/wan_2.1_vae.safetensors",
+        sha256="2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b",
+        token_env="HF_TOKEN",
+    ),
+)
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(CHUNK_SIZE), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def ensure_disk_space() -> None:
+    MODELS_ROOT.mkdir(parents=True, exist_ok=True)
+    if all((MODELS_ROOT / artifact.relative_path).exists() for artifact in ARTIFACTS):
+        return
+    free = shutil.disk_usage(MODELS_ROOT).free
+    required = 45 * 1024**3
+    if free < required:
+        raise RuntimeError(
+            f"at least 45 GiB free is required for first download; found {free / 1024**3:.1f} GiB"
+        )
+
+
+def download(artifact: Artifact) -> None:
+    destination = MODELS_ROOT / artifact.relative_path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    if destination.exists():
+        print(f"verifying {artifact.name}: {destination}", flush=True)
+        if sha256_file(destination) == artifact.sha256:
+            print(f"verified {artifact.name}", flush=True)
+            return
+        raise RuntimeError(f"checksum mismatch for existing file: {destination}")
+
+    token = os.environ.get(artifact.token_env)
+    if not token:
+        raise RuntimeError(
+            f"{artifact.token_env} must be set to download {artifact.name}"
+        )
+
+    partial = destination.with_suffix(destination.suffix + ".part")
+    resume_at = partial.stat().st_size if partial.exists() else 0
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "private-model-hosting/1.0",
+    }
+    if resume_at:
+        headers["Range"] = f"bytes={resume_at}-"
+    request = urllib.request.Request(artifact.url, headers=headers)
+
+    print(f"downloading {artifact.name} to {destination}", flush=True)
+    started = time.monotonic()
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            resumed = resume_at > 0 and response.status == 206
+            mode = "ab" if resumed else "wb"
+            downloaded = resume_at if resumed else 0
+            if resume_at and not resumed:
+                print("  server did not accept resume; restarting download", flush=True)
+            with partial.open(mode) as output:
+                while True:
+                    chunk = response.read(CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    output.write(chunk)
+                    downloaded += len(chunk)
+                    if downloaded % (1024**3) < CHUNK_SIZE:
+                        print(f"  {downloaded / 1024**3:.1f} GiB", flush=True)
+                output.flush()
+                os.fsync(output.fileno())
+    except (OSError, urllib.error.URLError):
+        print(f"download interrupted; partial file retained at {partial}", flush=True)
+        raise
+
+    actual = sha256_file(partial)
+    if actual != artifact.sha256:
+        partial.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"checksum mismatch for {artifact.name}: expected {artifact.sha256}, got {actual}"
+        )
+    os.replace(partial, destination)
+    elapsed = time.monotonic() - started
+    print(f"downloaded and verified {artifact.name} in {elapsed:.1f}s", flush=True)
+
+
+def main() -> int:
+    ensure_disk_space()
+    for artifact in ARTIFACTS:
+        download(artifact)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        print(f"model preparation failed: {exc}", file=sys.stderr, flush=True)
+        raise

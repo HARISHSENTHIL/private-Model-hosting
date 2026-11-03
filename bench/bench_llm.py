@@ -41,11 +41,16 @@ async def _one_request(client: httpx.AsyncClient, url: str, model: str) -> float
 
 async def _run_at_concurrency(
     url: str, api_key: str, model: str, concurrency: int
-) -> list[float]:
+) -> tuple[list[float], int, float]:
     headers = {"Authorization": f"Bearer {api_key}"}
     async with httpx.AsyncClient(headers=headers) as client:
         tasks = [_one_request(client, url, model) for _ in range(concurrency)]
-        return await asyncio.gather(*tasks)
+        started = time.monotonic()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        wall_time = time.monotonic() - started
+    latencies = [result for result in results if isinstance(result, float)]
+    errors = len(results) - len(latencies)
+    return latencies, errors, wall_time
 
 
 async def main() -> None:
@@ -62,17 +67,28 @@ async def main() -> None:
     )
     args = ap.parse_args()
 
-    print(f"{'concurrency':>12} {'p50_s':>8} {'p95_s':>8} {'max_s':>8} {'errors':>8}")
+    print(
+        f"{'concurrency':>12} {'p50_s':>8} {'p95_s':>8} "
+        f"{'max_s':>8} {'req_s':>8} {'errors':>8}"
+    )
     for c in args.concurrency:
-        try:
-            latencies = await _run_at_concurrency(args.url, args.api_key, args.model, c)
-            errors = 0
-        except httpx.HTTPStatusError as exc:
-            print(f"{c:>12}  request failed at this concurrency: {exc}")
+        latencies, errors, wall_time = await _run_at_concurrency(
+            args.url, args.api_key, args.model, c
+        )
+        if not latencies:
+            print(f"{c:>12}  all requests failed ({errors} errors)")
             continue
         p50 = statistics.median(latencies)
-        p95 = statistics.quantiles(latencies, n=20)[18] if len(latencies) > 1 else latencies[0]
-        print(f"{c:>12} {p50:>8.2f} {p95:>8.2f} {max(latencies):>8.2f} {errors:>8}")
+        p95 = (
+            statistics.quantiles(latencies, n=20)[18]
+            if len(latencies) > 1
+            else latencies[0]
+        )
+        throughput = len(latencies) / wall_time
+        print(
+            f"{c:>12} {p50:>8.2f} {p95:>8.2f} {max(latencies):>8.2f} "
+            f"{throughput:>8.2f} {errors:>8}"
+        )
         print(
             "  -> if p50/p95 jump sharply vs. the previous row, that's the "
             "concurrency ceiling — cross-check against the engine's own "
