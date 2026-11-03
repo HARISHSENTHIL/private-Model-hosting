@@ -8,12 +8,45 @@ import shutil
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
 MODELS_ROOT = Path("/root/comfyui/models")
 CHUNK_SIZE = 16 * 1024 * 1024
+
+
+class TokenSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Follow HTTPS redirects without forwarding credentials cross-origin."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is None:
+            return None
+
+        source = urllib.parse.urlsplit(req.full_url)
+        target = urllib.parse.urlsplit(redirected.full_url)
+        if target.scheme != "https":
+            raise urllib.error.HTTPError(
+                req.full_url,
+                code,
+                "refusing non-HTTPS download redirect",
+                headers,
+                fp,
+            )
+
+        source_origin = (source.scheme, source.hostname, source.port)
+        target_origin = (target.scheme, target.hostname, target.port)
+        if source_origin != target_origin:
+            # Civitai redirects to a signed CDN URL. urllib otherwise copies the
+            # bearer token to that host, which both leaks it and can make the
+            # CDN reject the request because the URL already carries auth.
+            redirected.remove_header("Authorization")
+        return redirected
+
+
+URL_OPENER = urllib.request.build_opener(TokenSafeRedirectHandler())
 
 
 @dataclass(frozen=True)
@@ -108,7 +141,7 @@ def download(artifact: Artifact) -> None:
     print(f"downloading {artifact.name} to {destination}", flush=True)
     started = time.monotonic()
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        with URL_OPENER.open(request, timeout=120) as response:
             resumed = resume_at > 0 and response.status == 206
             mode = "ab" if resumed else "wb"
             downloaded = resume_at if resumed else 0
@@ -125,6 +158,14 @@ def download(artifact: Artifact) -> None:
                         print(f"  {downloaded / 1024**3:.1f} GiB", flush=True)
                 output.flush()
                 os.fsync(output.fileno())
+    except urllib.error.HTTPError as exc:
+        print(
+            f"download request failed with HTTP {exc.code} ({exc.reason})",
+            file=sys.stderr,
+            flush=True,
+        )
+        print(f"download interrupted; partial file retained at {partial}", flush=True)
+        raise
     except (OSError, urllib.error.URLError):
         print(f"download interrupted; partial file retained at {partial}", flush=True)
         raise

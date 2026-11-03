@@ -15,7 +15,8 @@ less cache and concurrency headroom than the former TP=2 layout.
 
 The images, model revisions, and downloaded artifacts are immutable-version or
 SHA-256 pinned. APIs bind to loopback by default, receive only the secrets they
-need, expose health checks and metrics, and use bounded admission queues.
+need, and expose health checks and metrics. The LLM and LUSTIFY services have
+bounded admission controls; Qwen Image needs an upstream bounded API gateway.
 
 ## Production gates
 
@@ -84,9 +85,11 @@ docker compose logs -f llm-huihui-qwen
 - SGLang continuously batches LLM tokens. `LLM_MAX_RUNNING_REQUESTS` caps the
   active batch and `LLM_MAX_QUEUED_REQUESTS` rejects overload instead of growing
   memory without bound.
-- vLLM-Omni uses step-wise diffusion scheduling and prefix-KV reuse.
-  `QWEN_IMAGE_MAX_NUM_SEQS` controls active images and
-  `QWEN_IMAGE_MAX_QUEUED_REQUESTS` bounds total in-flight requests.
+- vLLM-Omni uses step-wise diffusion scheduling.
+  `QWEN_IMAGE_MAX_NUM_SEQS` controls scheduler capacity. Start at `1`: this
+  execution mode is experimental and the engine does not expose a supported
+  bounded-waiting-queue option in the pinned release. Enforce the public
+  request and queue limits in an upstream API gateway before production use.
 - ComfyUI renders one LUSTIFY image at a time. The shim keeps a bounded FCFS
   queue and returns HTTP 503 with `Retry-After` when full.
 

@@ -11,7 +11,4 @@ exec vllm serve Qwen/Qwen-Image-2.1 \
     --api-key "${INTERNAL_API_KEY}" \
     --dtype bfloat16 \
     --step-execution \
-    --max-num-seqs "${QWEN_IMAGE_MAX_NUM_SEQS:-4}" \
-    --max-num-active-seqs "${QWEN_IMAGE_MAX_NUM_SEQS:-4}" \
-    --max-num-queued-reqs "${QWEN_IMAGE_MAX_QUEUED_REQUESTS:-36}" \
-    --scheduling-policy fcfs
+    --max-num-seqs "${QWEN_IMAGE_MAX_NUM_SEQS:-1}"

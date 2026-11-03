@@ -33,7 +33,7 @@ parallel size 1. Its roughly
 55.6 GB of weights fit on an 80 GB H100, but engine state, activations, attention
 KV cache, and recurrent GDN state must share the remaining memory. SGLang still
 performs continuous token batching and prefix caching, but the initial active
-request limit is therefore reduced to 32. Active and queued requests are
+request limit is therefore reduced to 8. Active and queued requests are
 bounded separately so overload fails predictably.
 
 Do not enable FP8 weights or KV cache merely to increase a benchmark number.
@@ -79,10 +79,10 @@ metrics, and returns 503 on overload or failed readiness.
 
 | Resource | Initial setting | Overload behavior |
 |---|---:|---|
-| LLM active requests | 32 | queued by SGLang |
+| LLM active requests | 8 | queued by SGLang |
 | LLM total queued | 128 | reject at engine limit |
-| Qwen Image active sequences | 4 | step-wise scheduled |
-| Qwen Image total in flight | 36 | HTTP 503 |
+| Qwen Image scheduler capacity | 1 | step-wise scheduled |
+| Qwen Image waiting queue | Not bounded by the engine | Bound it in the upstream API gateway |
 | LUSTIFY active renders | 1 | queued by shim |
 | LUSTIFY waiting queue | 32 | HTTP 503 + `Retry-After` |
 
