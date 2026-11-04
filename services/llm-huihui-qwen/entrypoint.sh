@@ -8,6 +8,7 @@ exec sglang serve \
     --model-path huihui-ai/Huihui-Qwen3.8-27B-abliterated \
     --revision 739e3c5b89849f6c238ce1e5b70008612ae42cdd \
     --served-model-name huihui-qwen3-27b-abliterated \
+    --json-model-override-args '{"language_model_only": true}' \
     --dtype bfloat16 \
     --tensor-parallel-size 1 \
     --context-length 32768 \
