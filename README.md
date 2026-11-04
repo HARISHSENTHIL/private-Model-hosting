@@ -7,11 +7,13 @@ node. The stack keeps prompts and outputs on infrastructure you control.
 |---|---|---:|---|
 | Huihui Qwen3.8 27B | SGLang 0.5.19 | 0, TP=1 | `:8001/v1/chat/completions` |
 | Qwen Image 2.1 | vLLM-Omni 0.32 | 3 | `:8002/v1/images/*` |
-| LUSTIFY v10 Krea 2 RAW | ComfyUI 0.43 + bounded shim | 2 | `:8003/v1/images/generations` |
+| LUSTIFY v10 Krea 2 Turbo | ComfyUI 0.43 + bounded shim | 2 | `:8003/v1/images/generations` |
+| Qwen3-VL-30B-A3B Instruct FP8 | SGLang 0.5.19 | 1, TP=1 | `:8004/v1/chat/completions` |
 
-GPU 1 is intentionally unallocated and available for another model or a
-measured replica. The BF16 LLM fits on one 80 GB H100, but with substantially
-less cache and concurrency headroom than the former TP=2 layout.
+The BF16 LLM fits on one 80 GB H100, but with substantially less cache and
+concurrency headroom than the former TP=2 layout. Qwen3-VL is a vision-capable
+(image/video + text) model, stock-aligned (not abliterated), Apache-2.0
+licensed, and needs no restricted/research Compose profile.
 
 The images, model revisions, and downloaded artifacts are immutable-version or
 SHA-256 pinned. APIs bind to loopback by default, receive only the secrets they
@@ -54,13 +56,13 @@ this stack is deployed.
 
 ## Build and start
 
-The default Compose profile contains only the commercially cleared LLM. Build
-and start either restricted image service only after obtaining the required
-approvals described above.
+The default Compose profile contains the commercially cleared LLM and VLM.
+Build and start either restricted image service only after obtaining the
+required approvals described above.
 
 ```bash
-docker compose build llm-huihui-qwen
-docker compose up -d llm-huihui-qwen
+docker compose build llm-huihui-qwen vlm-qwen3
+docker compose up -d llm-huihui-qwen vlm-qwen3
 
 # Research/internal evaluation only until Qwen commercial licensing clears:
 docker compose --profile research build image-qwen
@@ -71,9 +73,9 @@ docker compose --profile restricted build image-lustify
 docker compose --profile restricted up -d image-lustify
 ```
 
-First startup downloads roughly 56 GB for the LLM, 33 GB for Qwen Image, and
-about 34 GB for LUSTIFY. Health-check start periods account for this, but actual
-download time depends on the host connection.
+First startup downloads roughly 56 GB for the LLM, 30 GB for the VLM, 33 GB
+for Qwen Image, and about 34 GB for LUSTIFY. Health-check start periods
+account for this, but actual download time depends on the host connection.
 
 ```bash
 docker compose ps
@@ -92,6 +94,10 @@ docker compose logs -f llm-huihui-qwen
   request and queue limits in an upstream API gateway before production use.
 - ComfyUI renders one LUSTIFY image at a time. The shim keeps a bounded FCFS
   queue and returns HTTP 503 with `Retry-After` when full.
+- SGLang also batches VLM requests. `VLM_MAX_RUNNING_REQUESTS` and
+  `VLM_MAX_QUEUED_REQUESTS` bound it the same way as the LLM; the starting
+  values are deliberately lower since image/video inputs consume far more
+  context per request than text alone.
 
 The defaults are safe starting points, not throughput promises. Benchmark the
 actual node, then tune from observed p95 latency, GPU memory, and queue depth.
@@ -102,6 +108,7 @@ actual node, then tune from observed p95 latency, GPU memory, and queue depth.
 curl -fsS http://127.0.0.1:8001/health
 curl -fsS http://127.0.0.1:8002/health
 curl -fsS http://127.0.0.1:8003/health
+curl -fsS http://127.0.0.1:8004/health
 
 python bench/bench_llm.py \
   --url http://127.0.0.1:8001 \

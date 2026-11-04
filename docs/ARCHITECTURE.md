@@ -7,10 +7,9 @@ Last verified against upstream documentation: 2026-11-03.
 ```text
 proxyllm / private reverse proxy
   ├─ chat  :8001 → SGLang → Huihui Qwen3.8 27B on GPU 0
+  ├─ chat  :8004 → SGLang → Qwen3-VL-30B-A3B Instruct FP8 on GPU 1
   ├─ image :8002 → vLLM-Omni → Qwen Image 2.1 on GPU 3
   └─ image :8003 → bounded FastAPI shim → ComfyUI → LUSTIFY on GPU 2
-
-GPU 1 is deliberately unallocated for a fourth model or a future replica.
 ```
 
 All public traffic must enter through proxyllm or a private reverse proxy. Host
@@ -39,6 +38,28 @@ bounded separately so overload fails predictably.
 Do not enable FP8 weights or KV cache merely to increase a benchmark number.
 Evaluate any quantized checkpoint against the BF16 deployment first.
 
+### VLM: SGLang 0.5.19
+
+Qwen3-VL family support landed in SGLang v0.5.3; v0.5.19 is well past that, so
+the service reuses the same pinned runtime image as the LLM rather than
+tracking a second one. Unlike the LLM, this model is **not** abliterated —
+stock-aligned Instruct behavior is intentional here, chosen for general
+image/video understanding rather than uncensored chat.
+
+The service pins `Qwen/Qwen3-VL-30B-A3B-Instruct-FP8` to Hugging Face revision
+`d9748a51ae66354c4dad665aab2c71f26cf2c8cd` and runs on GPU 1 with tensor
+parallel size 1. It is a mixture-of-experts checkpoint (30B total / 3B active
+parameters per token), so its ~30 GB of FP8 weights leave far more headroom for
+KV cache than a dense model of similar total size, and per-token compute is
+cheap relative to its quality. Apache-2.0 licensed; no restricted/research
+Compose profile is required.
+
+`VLM_MAX_RUNNING_REQUESTS` and `VLM_MAX_QUEUED_REQUESTS` bound admission the
+same way as the LLM service. The initial limits are set lower than the LLM's,
+since image and video inputs consume substantially more context per request
+than text tokens alone — tune only after measuring actual multimodal request
+sizes.
+
 ### General image: vLLM-Omni 0.32
 
 Qwen's official Qwen-Image-2.1 repository documents vLLM-Omni online serving,
@@ -58,14 +79,20 @@ deployment if it cannot start CUDA 13 containers.
 
 ### Restricted image: native ComfyUI 0.43
 
-Current ComfyUI supports Krea 2, Qwen3-VL conditioning, and AuraFlow model
-sampling natively; no custom node pack is required. The service uses:
+Current ComfyUI supports Krea 2 and Qwen3-VL conditioning natively; no custom
+node pack is required. The service uses:
 
-- LUSTIFY v10 Krea 2 RAW BF16, Civitai file `3015314`, SHA-256 pinned.
+- LUSTIFY v10 Krea 2 Turbo BF16, Civitai file `3015314`, SHA-256 pinned. This
+  is the 8-step guidance- and timestep-distilled checkpoint, recommended by
+  the LUSTIFY author for inference (the companion RAW checkpoint, Civitai file
+  `3015315`, is meant for training/fine-tuning and is not pulled by default).
 - Qwen3-VL 4B BF16 text encoder at an immutable Hugging Face revision.
-- Wan 2.1 VAE at an immutable Hugging Face revision, matching the checkpoint
-  author's recommendation.
-- A native-node-only API workflow: AuraFlow shift 4, Euler/Beta, 52 RAW steps.
+- Qwen Image VAE at an immutable Hugging Face revision — the VAE Krea 2 is
+  actually trained against (do not substitute the similarly-sized Wan 2.1 VAE;
+  it is a different checkpoint and silently degrades decode quality).
+- A native-node-only API workflow: no model-sampling shift node (Turbo's
+  distillation bakes in its own schedule), Euler/Simple, 8 steps, CFG 1.0
+  (ComfyUI's "no guidance" value).
 
 The model downloader streams to a temporary file, verifies SHA-256, fsyncs, and
 atomically renames. Existing files are verified again on restart.
@@ -81,6 +108,8 @@ metrics, and returns 503 on overload or failed readiness.
 |---|---:|---|
 | LLM active requests | 8 | queued by SGLang |
 | LLM total queued | 128 | reject at engine limit |
+| VLM active requests | 16 | queued by SGLang |
+| VLM total queued | 64 | reject at engine limit |
 | Qwen Image scheduler capacity | 1 | step-wise scheduled |
 | Qwen Image waiting queue | Not bounded by the engine | Bound it in the upstream API gateway |
 | LUSTIFY active renders | 1 | queued by shim |

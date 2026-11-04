@@ -45,6 +45,41 @@ services:
       retries: 5
       start_period: 20m
 
+  vlm-qwen3:
+    <<: *service-defaults
+    platform: linux/amd64
+    build:
+      context: ./services/vlm-qwen3
+    environment:
+      HF_TOKEN: ${HF_TOKEN:?HF_TOKEN must be set}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?INTERNAL_API_KEY must be set}
+      VLM_CONTEXT_LENGTH: ${VLM_CONTEXT_LENGTH:-128000}
+      VLM_MAX_RUNNING_REQUESTS: ${VLM_MAX_RUNNING_REQUESTS:-16}
+      VLM_MAX_QUEUED_REQUESTS: ${VLM_MAX_QUEUED_REQUESTS:-64}
+      PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+    ports:
+      - "${PRIVATE_BIND_ADDRESS:-127.0.0.1}:8004:8000"
+    volumes:
+      - ${MODEL_CACHE_DIR:?MODEL_CACHE_DIR must be set}/vlm-qwen3:/root/.cache/huggingface
+    ipc: host
+    shm_size: "16gb"
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15m
+
   image-qwen:
     <<: *service-defaults
     platform: linux/amd64
