@@ -126,7 +126,7 @@ class GenerationsRequest(BaseModel):
     size: str = "1024x1024"
     response_format: Literal["b64_json"] = "b64_json"
     seed: int | None = Field(default=None, ge=0, le=2**63 - 1)
-    num_inference_steps: int = Field(default=52, ge=8, le=80)
+    num_inference_steps: int = Field(default=8, ge=8, le=80)
 
     model_config = {"extra": "forbid"}
 

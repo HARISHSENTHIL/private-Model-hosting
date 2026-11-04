@@ -2,7 +2,7 @@
   "1": {
     "class_type": "UNETLoader",
     "inputs": {
-      "unet_name": "lustify-v10-krea-raw-bf16.safetensors",
+      "unet_name": "lustify-v10-krea-turbo-bf16.safetensors",
       "weight_dtype": "default"
     }
   },
@@ -17,7 +17,7 @@
   "3": {
     "class_type": "VAELoader",
     "inputs": {
-      "vae_name": "wan_2.1_vae.safetensors"
+      "vae_name": "qwen_image_vae.safetensors"
     }
   },
   "4": {
@@ -33,13 +33,6 @@
       "conditioning": ["4", 0]
     }
   },
-  "6": {
-    "class_type": "ModelSamplingAuraFlow",
-    "inputs": {
-      "model": ["1", 0],
-      "shift": 4.0
-    }
-  },
   "7": {
     "class_type": "EmptyLatentImage",
     "inputs": {
@@ -52,12 +45,12 @@
     "class_type": "KSampler",
     "inputs": {
       "seed": 0,
-      "steps": 52,
+      "steps": 8,
       "cfg": 1.0,
       "sampler_name": "euler",
-      "scheduler": "beta",
+      "scheduler": "simple",
       "denoise": 1.0,
-      "model": ["6", 0],
+      "model": ["1", 0],
       "positive": ["4", 0],
       "negative": ["5", 0],
       "latent_image": ["7", 0]

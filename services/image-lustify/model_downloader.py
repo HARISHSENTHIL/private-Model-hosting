@@ -61,9 +61,9 @@ class Artifact:
 
 ARTIFACTS = (
     Artifact(
-        name="LUSTIFY v10 Krea 2 RAW BF16",
+        name="LUSTIFY v10 Krea 2 Turbo BF16",
         url="https://civitai.com/api/download/models/3112728?fileId=3015314",
-        relative_path="diffusion_models/lustify-v10-krea-raw-bf16.safetensors",
+        relative_path="diffusion_models/lustify-v10-krea-turbo-bf16.safetensors",
         sha256="04571b6cf9b9c8a3868ed3695c94de48d8206a37670ea36c6a043e86dda327d3",
         size_bytes=26_283_344_816,
         token_env="CIVITAI_API_TOKEN",
@@ -81,15 +81,15 @@ ARTIFACTS = (
         token_env="HF_TOKEN",
     ),
     Artifact(
-        name="Wan 2.1 VAE",
+        name="Qwen Image VAE",
         url=(
-            "https://huggingface.co/Comfy-Org/Wan-2.1/resolve/"
-            "123acf1cc74bccbb9bfff8ac1ee72edc08c2341d/"
-            "split_files/vae/wan_2.1_vae.safetensors"
+            "https://huggingface.co/Comfy-Org/Krea-2/resolve/"
+            "588feaf955b08b9ac4723eeb751752ab045dba71/"
+            "vae/qwen_image_vae.safetensors"
         ),
-        relative_path="vae/wan_2.1_vae.safetensors",
-        sha256="2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b",
-        size_bytes=253_815_318,
+        relative_path="vae/qwen_image_vae.safetensors",
+        sha256="a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f",
+        size_bytes=253_806_246,
         token_env="HF_TOKEN",
     ),
 )
