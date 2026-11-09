@@ -16,6 +16,7 @@ exec sglang serve \
     --chunked-prefill-size 8192 \
     --max-running-requests "${VLM_MAX_RUNNING_REQUESTS:-16}" \
     --max-queued-requests "${VLM_MAX_QUEUED_REQUESTS:-64}" \
+    --tool-call-parser qwen \
     --schedule-policy fcfs \
     --enable-metrics \
     --host 0.0.0.0 \

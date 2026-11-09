@@ -7,10 +7,15 @@ Last verified against upstream documentation: 2026-11-03.
 ```text
 proxyllm / private reverse proxy
   ├─ chat  :8001 → SGLang → Huihui Qwen3.8 27B on GPU 0
-  ├─ chat  :8004 → SGLang → Qwen3-VL-30B-A3B Instruct FP8 on GPU 1
+  ├─ chat  :8004 → SGLang → Qwen3-VL-30B-A3B Instruct FP8 on GPU 1  (public: qtextvl.heyopen.ai)
   ├─ image :8002 → vLLM-Omni → Qwen Image 2.1 on GPU 3
   └─ image :8003 → bounded FastAPI shim → ComfyUI → LUSTIFY on GPU 2
 ```
+
+`qtextvl.heyopen.ai` is the public hostname the reverse proxy terminates TLS for and
+forwards to `127.0.0.1:8004`. That proxy (TLS, auth, rate limiting) lives outside
+this repository — nothing here changes for a hostname mapping; it only needs DNS
+pointed at the host and the proxy's vhost/route config updated.
 
 All public traffic must enter through proxyllm or a private reverse proxy. Host
 ports bind to `127.0.0.1` unless `PRIVATE_BIND_ADDRESS` is explicitly changed.
@@ -59,6 +64,14 @@ same way as the LLM service. The initial limits are set lower than the LLM's,
 since image and video inputs consume substantially more context per request
 than text tokens alone — tune only after measuring actual multimodal request
 sizes.
+
+Tool calling is enabled via `--tool-call-parser qwen`, which converts Qwen's
+native `<tool_call>` tag syntax into the OpenAI-compatible structured
+`tool_calls` response field. Without this flag SGLang returns the tag
+verbatim as plain text with `finish_reason: "stop"` instead of
+`"tool_calls"` — confirm with `--help` on the deployed SGLang version if the
+Qwen3-VL checkpoint revision ever changes, since parser names are tied to
+the model family's chat template, not guaranteed stable across releases.
 
 ### General image: vLLM-Omni 0.32
 
@@ -110,7 +123,7 @@ metrics, and returns 503 on overload or failed readiness.
 | LLM total queued | 128 | reject at engine limit |
 | VLM active requests | 16 | queued by SGLang |
 | VLM total queued | 64 | reject at engine limit |
-| Qwen Image scheduler capacity | 1 | step-wise scheduled |
+| Qwen Image scheduler capacity | 3 (testing, was 1) | step-wise scheduled |
 | Qwen Image waiting queue | Not bounded by the engine | Bound it in the upstream API gateway |
 | LUSTIFY active renders | 1 | queued by shim |
 | LUSTIFY waiting queue | 32 | HTTP 503 + `Retry-After` |
