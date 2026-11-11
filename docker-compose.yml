@@ -150,3 +150,53 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30m
+
+  hunyuan3d-2:
+    <<: *service-defaults
+    platform: linux/amd64
+    profiles: ["gated"]
+    build:
+      context: ./services/hunyuan3d-2
+    environment:
+      HF_TOKEN: ${HF_TOKEN:?HF_TOKEN must be set}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:?INTERNAL_API_KEY must be set}
+      # Internal Compose-network URL for the text-to-3D path's text->image
+      # step. Soft runtime dependency, not a hard `depends_on`: image-qwen
+      # only starts under the separate "research" profile, so image-to-3D
+      # keeps working with this service alone while text-to-3D 502s clearly
+      # if image-qwen isn't also running.
+      IMAGE_QWEN_BASE_URL: ${IMAGE_QWEN_BASE_URL:-http://image-qwen:8000}
+      HUNYUAN3D_MAX_QUEUE_SIZE: ${HUNYUAN3D_MAX_QUEUE_SIZE:-16}
+      HUNYUAN3D_JOB_TIMEOUT_SECONDS: ${HUNYUAN3D_JOB_TIMEOUT_SECONDS:-1200}
+      HUNYUAN3D_IDLE_UNLOAD_SECONDS: ${HUNYUAN3D_IDLE_UNLOAD_SECONDS:-600}
+      HUNYUAN3D_MAX_IMAGE_BYTES: ${HUNYUAN3D_MAX_IMAGE_BYTES:-20971520}
+    ports:
+      - "${PRIVATE_BIND_ADDRESS:-127.0.0.1}:8005:8000"
+    volumes:
+      - ${MODEL_CACHE_DIR:?MODEL_CACHE_DIR must be set}/hunyuan3d-2:/root/hunyuan3d/models
+    ipc: host
+    shm_size: "16gb"
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              # Shares GPU2 with image-lustify. NVIDIA/Docker does not
+              # enforce mutual exclusion between containers reserving the
+              # same device_ids - see docs/ARCHITECTURE.md for the
+              # co-tenancy rationale and the idle-unload mitigation.
+              device_ids: ["2"]
+              capabilities: [gpu]
+    healthcheck:
+      # Only checks worker-thread liveness, not pipeline-loaded state -
+      # pipelines lazy-load on first real request and idle-unload after
+      # HUNYUAN3D_IDLE_UNLOAD_SECONDS, so "ok" here is reachable right after
+      # the (download-only) startup work finishes, well before any GPU load.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20m

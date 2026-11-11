@@ -9,6 +9,7 @@ node. The stack keeps prompts and outputs on infrastructure you control.
 | Qwen Image 2.1 | vLLM-Omni 0.32 | 3 | `:8002/v1/images/*` |
 | LUSTIFY v10 Krea 2 Turbo | ComfyUI 0.43 + bounded shim | 2 | `:8003/v1/images/generations` |
 | Qwen3-VL-30B-A3B Instruct FP8 | SGLang 0.5.19 | 1, TP=1 | `:8004/v1/chat/completions` |
+| Hunyuan3D-2 turbo | in-process bounded shim | 2 (shared with LUSTIFY) | `:8005/v1/3d/generations` |
 
 The BF16 LLM fits on one 80 GB H100, but with substantially less cache and
 concurrency headroom than the former TP=2 layout. Qwen3-VL is a vision-capable
@@ -25,7 +26,10 @@ bounded admission controls; Qwen Image needs an upstream bounded API gateway.
 Read [`docs/LICENSES.md`](docs/LICENSES.md) before starting either image model.
 As of 2026-11-03, Qwen Image 2.1 is non-commercial without a separate license,
 and LUSTIFY/Krea 2 is not cleared for a general paid API. LUSTIFY is therefore
-behind the explicit Compose profile `restricted`.
+behind the explicit Compose profile `restricted`. Hunyuan3D-2 is behind its
+own `gated` profile (an MAU threshold + EU/UK/South Korea exclusion, not a
+safety gate); its text-to-3D path additionally inherits Qwen Image's
+non-commercial restriction since it calls `image-qwen` internally.
 
 This repository supplies inference infrastructure. It does not by itself supply
 the age verification, consent/NCII controls, content moderation, abuse response,
@@ -71,11 +75,17 @@ docker compose --profile research up -d image-qwen
 # Restricted/internal evaluation only until licensing and safety gates clear:
 docker compose --profile restricted build image-lustify
 docker compose --profile restricted up -d image-lustify
+
+# Gated: image-to-3D works alone; text-to-3D additionally needs image-qwen
+# (profile "research") running, and inherits its non-commercial restriction.
+docker compose --profile gated build hunyuan3d-2
+docker compose --profile gated up -d hunyuan3d-2
 ```
 
 First startup downloads roughly 56 GB for the LLM, 30 GB for the VLM, 33 GB
-for Qwen Image, and about 34 GB for LUSTIFY. Health-check start periods
-account for this, but actual download time depends on the host connection.
+for Qwen Image, about 34 GB for LUSTIFY, and about 15 GB for Hunyuan3D-2.
+Health-check start periods account for this, but actual download time
+depends on the host connection.
 
 ```bash
 docker compose ps
@@ -94,6 +104,10 @@ docker compose logs -f llm-huihui-qwen
   request and queue limits in an upstream API gateway before production use.
 - ComfyUI renders one LUSTIFY image at a time. The shim keeps a bounded FCFS
   queue and returns HTTP 503 with `Retry-After` when full.
+- Hunyuan3D-2's single worker thread generates one mesh at a time; the shim
+  keeps a bounded FCFS queue (`HUNYUAN3D_MAX_QUEUE_SIZE`) the same way.
+  Pipelines idle-unload from VRAM after `HUNYUAN3D_IDLE_UNLOAD_SECONDS` since
+  it shares GPU2 with LUSTIFY.
 - SGLang also batches VLM requests. `VLM_MAX_RUNNING_REQUESTS` and
   `VLM_MAX_QUEUED_REQUESTS` bound it the same way as the LLM; the starting
   values are deliberately lower since image/video inputs consume far more
@@ -109,6 +123,7 @@ curl -fsS http://127.0.0.1:8001/health
 curl -fsS http://127.0.0.1:8002/health
 curl -fsS http://127.0.0.1:8003/health
 curl -fsS http://127.0.0.1:8004/health
+curl -fsS http://127.0.0.1:8005/health
 
 python bench/bench_llm.py \
   --url http://127.0.0.1:8001 \
@@ -116,6 +131,10 @@ python bench/bench_llm.py \
 
 python bench/bench_image.py \
   --url http://127.0.0.1:8002 \
+  --api-key "$INTERNAL_API_KEY"
+
+python bench/bench_mesh.py \
+  --url http://127.0.0.1:8005 \
   --api-key "$INTERNAL_API_KEY"
 ```
 

@@ -50,7 +50,8 @@ fi
 install -d -m 0750 \
     "${MODEL_CACHE_DIR}/huihui-qwen" \
     "${MODEL_CACHE_DIR}/qwen-image" \
-    "${MODEL_CACHE_DIR}/lustify"
+    "${MODEL_CACHE_DIR}/lustify" \
+    "${MODEL_CACHE_DIR}/hunyuan3d-2"
 
 available_kb=$(df -Pk "${MODEL_CACHE_DIR}" | awk 'NR==2 {print $4}')
 (( available_kb >= 500 * 1024 * 1024 )) || warn "less than 500 GiB is available under MODEL_CACHE_DIR"

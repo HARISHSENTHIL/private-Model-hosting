@@ -9,7 +9,8 @@ proxyllm / private reverse proxy
   ├─ chat  :8001 → SGLang → Huihui Qwen3.8 27B on GPU 0
   ├─ chat  :8004 → SGLang → Qwen3-VL-30B-A3B Instruct FP8 on GPU 1  (public: qtextvl.heyopen.ai)
   ├─ image :8002 → vLLM-Omni → Qwen Image 2.1 on GPU 3
-  └─ image :8003 → bounded FastAPI shim → ComfyUI → LUSTIFY on GPU 2
+  ├─ image :8003 → bounded FastAPI shim → ComfyUI → LUSTIFY on GPU 2
+  └─ 3d    :8005 → bounded FastAPI shim → in-process Hunyuan3D-2 turbo on GPU 2
 ```
 
 `qtextvl.heyopen.ai` is the public hostname the reverse proxy terminates TLS for and
@@ -115,6 +116,80 @@ plus a configurable bounded queue, validates dimensions/steps/count, uses
 constant-time bearer comparison, cleans generated files, exposes Prometheus
 metrics, and returns 503 on overload or failed readiness.
 
+### Gated 3D: Hunyuan3D-2 turbo
+
+Hunyuan3D-2 runs on GPU2, sharing it with `image-lustify` rather than getting
+a dedicated GPU. Live `nvidia-smi` readings on this node showed GPU0/GPU1
+(LLM/VLM) with only ~15 GB free each — too tight — while GPU2 and GPU3 each
+had ~47 GB free. Hunyuan3D-2's turbo pipelines (DiT shape generation + Paint
+texture generation, which internally runs its own delight step) need
+roughly 16 GB of VRAM, so even the worst observed case (LUSTIFY's ~33 GB
+loaded plus Hunyuan3D-2's ~16-20 GB) fits an 80 GB card with headroom.
+
+**Docker/NVIDIA does not enforce mutual exclusion between `image-lustify` and
+`hunyuan3d-2` on GPU2.** Both services declare `device_ids: ["2"]`, but
+neither MIG nor MPS partitioning is enabled on this node, so the GPU is
+shared by plain CUDA time-slicing: nothing stops both containers from holding
+resident weights and running kernels on GPU2 at the same time. This is a
+documented operating assumption, not an enforced guarantee. The mitigation is
+behavioral, not structural: Hunyuan3D-2 idle-unloads its pipelines from VRAM
+(`HUNYUAN3D_IDLE_UNLOAD_SECONDS`, default 600s) after a period with no queued
+or running job, specifically to spend as little time VRAM-hot as possible on
+a shared GPU; LUSTIFY has no equivalent and, per its own code, never
+auto-unloads. Confirm actual co-tenancy behavior (OOM risk, mutual latency
+impact) empirically before relying on this in production — see the
+Verification plan referenced from the implementation plan for this feature.
+
+Unlike every other service in this repo, Hunyuan3D-2's engine is not a
+separate backend HTTP process the shim proxies to (LUSTIFY's ComfyUI,
+vLLM-Omni, SGLang) — the DiT (shape) and Paint (texture) pipelines run
+in-process inside the shim, owned exclusively by one persistent worker
+thread that drains a plain queue. This guarantees strict GPU serialization
+by construction (one job at a time) without a separate GPU semaphore, and
+means pipeline load/unload is only ever touched by that one thread. There is
+no separate "Delight" pipeline to load or call directly: `Hunyuan3DPaintPipeline`
+loads the delight model itself and applies it internally, on the reference
+image, as part of its own texture-painting call (confirmed by reading
+`hy3dgen/texgen/pipelines.py` at the pinned commit, not assumed from the
+subfolder name alone).
+
+Weights are the turbo-distilled fp16 subset of `tencent/Hunyuan3D-2`
+(~15.2 GB across 9 files), pinned to Hugging Face revision
+`9cd649ba6913f7a852e3286bad86bfa9a2d83dcf`, downloaded and SHA-256 verified
+the same resumable way as LUSTIFY's artifacts. The serving code
+(`Tencent-Hunyuan/Hunyuan3D-2` on GitHub) is a separate repository with its
+own pin — `f8db63096c8282cb27354314d896feba5ba6ff8a` (current `main`; this
+repo has no version tags to pin to instead) — do not confuse the two SHAs.
+
+**Known gap: background removal is not checksum-pinned.** A plain (non-alpha)
+input image is run through `hy3dgen.rembg.BackgroundRemover` before shape
+generation, matching the upstream demo's own
+`if check_box_rembg or image.mode == "RGB":` behavior. That wraps the
+`rembg` package, whose `new_session()` downloads its own ONNX model
+(u2net, ~176 MB) from a GitHub release on first use and caches it outside
+`MODEL_CACHE_DIR`, unpinned and unverified — unlike every other weight this
+service uses. Fix before production: either vendor/pin that ONNX file the
+same way as the other artifacts, or pre-bake it into the image at a pinned
+digest.
+
+v1 supports both image-to-3D (native turbo-checkpoint input) and text-to-3D.
+Text-to-3D is **not** a second bundled model: the shim calls the already-running
+`image-qwen` service internally over the Compose network
+(`IMAGE_QWEN_BASE_URL`, default `http://image-qwen:8000`) to turn the prompt
+into an image first, then runs the normal image-to-3D path on that image.
+This is a soft runtime dependency, not a hard Compose `depends_on` —
+`image-qwen` only starts under the separate `research` profile, so
+image-to-3D keeps working standalone while text-to-3D fails clearly (502) if
+`image-qwen` isn't also running. Because of this, **the text-to-3D path
+additionally inherits `image-qwen`'s (Qwen Image 2.1) non-commercial license
+restriction**, even though the image-to-3D path does not — see
+`docs/LICENSES.md`.
+
+The service is in Compose's explicit `gated` profile — intentionally a
+different profile name from LUSTIFY's `restricted`, since the gating reason
+is different (Tencent's MAU threshold + EU/UK/South Korea exclusion, not
+NSFW/safety review).
+
 ## Capacity model
 
 | Resource | Initial setting | Overload behavior |
@@ -127,6 +202,8 @@ metrics, and returns 503 on overload or failed readiness.
 | Qwen Image waiting queue | Not bounded by the engine | Bound it in the upstream API gateway |
 | LUSTIFY active renders | 1 | queued by shim |
 | LUSTIFY waiting queue | 32 | HTTP 503 + `Retry-After` |
+| Hunyuan3D-2 active generations | 1 | queued by shim's worker thread |
+| Hunyuan3D-2 waiting queue | 16 | HTTP 503 + `Retry-After` |
 
 These values are deployment hypotheses. Capture at minimum p50/p95/p99 latency,
 throughput, queue time, HBM high-water mark, failure rate, and generated image
@@ -139,11 +216,13 @@ size for the real prompt/resolution mix. Keep 15–20% HBM headroom.
 - Restart policy, init process, graceful stop window, bounded JSON logs.
 - Loopback port binding and least-privilege secret injection per container.
 - `no-new-privileges` on all services.
-- Metrics: SGLang and vLLM native metrics; LUSTIFY at `/metrics`.
+- Metrics: SGLang and vLLM native metrics; LUSTIFY and Hunyuan3D-2 at `/metrics`.
 - Model caches persist on host NVMe. Generated LUSTIFY files use a bounded
   tmpfs and are removed after delivery.
 - Compose's default profile starts only the LLM. Qwen Image requires the
-  `research` profile and LUSTIFY requires the `restricted` profile.
+  `research` profile, LUSTIFY requires the `restricted` profile, and
+  Hunyuan3D-2 requires the `gated` profile (its text-to-3D path also needs
+  `research` running for `image-qwen`).
 
 ## Required production work outside this repository
 
@@ -173,3 +252,5 @@ revert; never mutate a version tag in place.
 - Qwen Image 2.1: https://github.com/QwenLM/Qwen-Image-2.1
 - vLLM-Omni Qwen Image recipe: https://github.com/vllm-project/vllm-omni/blob/main/recipes/Qwen/Qwen-Image-2.1.md
 - ComfyUI Krea 2 guide: https://docs.comfy.org/tutorials/image/krea/krea-2
+- Hunyuan3D-2 code: https://github.com/Tencent-Hunyuan/Hunyuan3D-2
+- Hunyuan3D-2 weights: https://huggingface.co/tencent/Hunyuan3D-2
