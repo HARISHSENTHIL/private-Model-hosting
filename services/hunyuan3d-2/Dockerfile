@@ -20,7 +20,7 @@ RUN echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4 \
     && sed -i 's|http://archive.ubuntu.com|https://archive.ubuntu.com|g; s|http://security.ubuntu.com|https://security.ubuntu.com|g' /etc/apt/sources.list.d/ubuntu.sources \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates git python3 python3-pip python3-venv \
+        ca-certificates git python3 python3-dev python3-pip python3-venv \
         build-essential ninja-build \
         libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
